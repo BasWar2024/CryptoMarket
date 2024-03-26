@@ -7,18 +7,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol" ;
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol" ;
 import "@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol" ;
 contract HYTGameSwap is AccessControl, Pausable, EIP712 {
-
-    bytes32 public constant SIGN_ROLE = keccak256("SIGN_ROLE");
-
     // record request id
     mapping(uint256 => bool) public orderNumExists ;
-
-    modifier orderNumRepeat (uint256 rId){
-        require(rId > 0, "Incorrect request id") ;
-        require(orderNumExists[rId] == false, "repeat request") ;
-        _;
-        orderNumExists[rId] = true ;
-    }
 
     // token erc20
     IERC20 public token ;
@@ -29,11 +19,10 @@ contract HYTGameSwap is AccessControl, Pausable, EIP712 {
     /////////////////////////////////////////////////
     //                  events
     /////////////////////////////////////////////////
-    event HYTClaimEvent(address account, uint256 amount, uint256 orderNum) ;
+    event HYTClaimEvent(address account, uint256 orderNum, uint256 amount) ;
 
     constructor(address sign, address tokenAddr) EIP712("HYTGameSwap", "v1.0.0") {
         _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        _setupRole(SIGN_ROLE, sign);
         token = IERC20(tokenAddr) ;
         signAddr = sign ;
     }
@@ -50,25 +39,29 @@ contract HYTGameSwap is AccessControl, Pausable, EIP712 {
         _unpause() ;
     }
 
-    // user claim
-    function hytClaim(uint256 amount,uint256 orderNum, bytes memory signature) external orderNumRepeat(orderNum) whenNotPaused {
-        require(amount > 0, "Incorrect amount of tokens withdrawn") ;
-        checkClaimSign(amount, orderNum, signature) ;
-        bool isOk = token.transfer(_msgSender(), amount) ;
-        require(isOk, "HYT Token Transfer fail") ;
-        emit HYTClaimEvent(_msgSender(), amount, orderNum) ;
+    // user claim batch
+    function hytClaimBatch(uint256 [] memory orderNum, uint256 [] memory amount, bytes memory signature) external whenNotPaused {
+        require(amount.length == orderNum.length && orderNum.length > 0, "Parameter error") ;
+        checkClaimSign(orderNum, amount, signature) ;
+
+        for(uint256 i = 0; i < orderNum.length; i++) {
+            require(orderNumExists[ orderNum [i] ] == false, "repeat request") ;
+            orderNumExists[ orderNum [i] ] = true ;
+            bool isOk = token.transfer(_msgSender(), amount[i]) ;
+            require(isOk, "HYT Token Transfer fail") ;
+            emit HYTClaimEvent(_msgSender(), orderNum[i], amount[i]) ;
+        }
     }
 
     // check claim signature
-    function checkClaimSign(uint256 amount,uint256 orderNum, bytes memory signature) private view {
+    function checkClaimSign(uint256 [] memory orderNum, uint256[] memory amount, bytes memory signature) private view {
         // cal hash
         bytes memory encodeData = abi.encode(
-            keccak256(abi.encodePacked("hytClaim(address owner,uint256 amount,uint256 orderNum)")),
-            _msgSender(),
-            amount,
-            orderNum
+            keccak256(abi.encodePacked("hytClaimBatch(uint256[] orderNum,uint256[] amount,address owner)")),
+            keccak256(abi.encodePacked(orderNum)),
+            keccak256(abi.encodePacked(amount)),
+            _msgSender()
         ) ;
-
         (address recovered, ECDSA.RecoverError error) = ECDSA.tryRecover(_hashTypedDataV4(keccak256(encodeData)), signature);
         require(error == ECDSA.RecoverError.NoError && recovered == signAddr, "Incorrect request signature") ;
     }

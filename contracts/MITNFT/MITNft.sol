@@ -132,6 +132,4 @@ contract MITNft is BaseNFT {
         }
         return (nftInfoArr, balanceOf(owner));
     }
-
-
 }
